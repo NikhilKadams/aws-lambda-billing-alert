@@ -1,0 +1,49 @@
+import boto3
+from datetime import datetime, timedelta
+
+# Initialize clients
+cloudwatch = boto3.client('cloudwatch')
+sns = boto3.client('sns')
+
+# Set these variables
+SNS_TOPIC_ARN = 'arn:aws:sns:us-east-1:975050024946:AwsBillingAlerts:c32721f6-c5db-438c-8f45-71f04dc92e8d'  
+
+def lambda_handler(event, context):
+    # Define the time range for the billing metric - last 24 hours
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=1)
+
+    # Get the AWS estimated charges metric for "Total Estimated Charge"
+    response = cloudwatch.get_metric_statistics(
+        Namespace='AWS/Billing',
+        MetricName='EstimatedCharges',
+        Dimensions=[
+            {'Name': 'Currency', 'Value': 'USD'}
+        ],
+        StartTime=start_time,
+        EndTime=end_time,
+        Period=86400,  # 24 hours in seconds
+        Statistics=['Maximum']
+    )
+
+    # Extract the maximum estimated charge value
+    datapoints = response.get('Datapoints', [])
+    if not datapoints:
+        print("No billing data available for the last 24 hours.")
+        return
+
+    max_charge = max(dp['Maximum'] for dp in datapoints)
+    print(f"Maximum estimated charge in the past 24 hours: ${max_charge:.2f}")
+
+    # Check against threshold and send alert if exceeded
+    if max_charge > BILLING_THRESHOLD:
+        message = f"Alert! AWS estimated charges have exceeded your threshold of ${BILLING_THRESHOLD:.2f}.\nCurrent estimated charge: ${max_charge:.2f}."
+        sns.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=message,
+            Subject="AWS Billing Alert"
+        )
+        print("Billing alert sent.")
+    else:
+        print("Billing is within threshold.")
+
